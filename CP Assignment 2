@@ -1,0 +1,229 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Structure to define the input fields (Variables changed to camelCase)
+struct FuelRecord {
+    char date[15];          
+    float prevOdometer;    
+    float currOdometer;    
+    float volumePumped;    
+    float totalCost;       
+};
+
+// Function prototypes (Functions in camelCase)
+void addRecord();
+void viewRecords();
+void editRecord();
+void deleteRecord();
+void clearInputBuffer();
+
+int main() {
+    int choice;
+
+    while (1) {
+        printf("\n=== 2-Wheeler Fuel Management ===\n");
+        printf("1. Add New Fuel Record\n");
+        printf("2. View All Records\n");
+        printf("3. Edit a Record\n");
+        printf("4. Delete a Record\n");
+        printf("5. Exit\n");
+        printf("Enter your choice: ");
+        
+        if (scanf("%d", &choice) != 1) {
+            printf("Invalid input. Please enter a number.\n");
+            clearInputBuffer();
+            continue;
+        }
+
+        switch (choice) {
+            case 1: addRecord(); break;
+            case 2: viewRecords(); break;
+            case 3: editRecord(); break;
+            case 4: deleteRecord(); break;
+            case 5: 
+                printf("Exiting program. Goodbye!\n");
+                exit(0);
+            default: printf("Invalid choice. Please try again.\n");
+        }
+    }
+    return 0;
+}
+
+void addRecord() {
+    struct FuelRecord record;
+    FILE *file = fopen("fuel_log.txt", "a");
+
+    if (file == NULL) {
+        printf("Error: Could not open file for writing.\n");
+        return;
+    }
+
+    printf("\n--- Enter Record Details ---\n");
+    printf("Date (DD-MM-YYYY): ");
+    scanf("%s", record.date);
+    printf("Previous Odometer Reading (km): ");
+    scanf("%f", &record.prevOdometer);
+    printf("Current Odometer Reading (km): ");
+    scanf("%f", &record.currOdometer);
+    printf("Volume Pumped (Liters): ");
+    scanf("%f", &record.volumePumped);
+    printf("Total Cost: ");
+    scanf("%f", &record.totalCost);
+
+    fprintf(file, "%s %.2f %.2f %.2f %.2f\n", 
+            record.date, record.prevOdometer, record.currOdometer, 
+            record.volumePumped, record.totalCost);
+
+    fclose(file);
+    printf("Record added successfully!\n");
+}
+
+void viewRecords() {
+    struct FuelRecord record;
+    FILE *file = fopen("fuel_log.txt", "r");
+    float delta, eff, costEff;
+    int lineNum = 1;
+
+    if (file == NULL) {
+        printf("\nNo records found.\n");
+        return;
+    }
+
+    printf("\n%-3s | %-12s | %-10s | %-10s | %-8s | %-6s | %-8s | %-10s | %-15s\n",
+           "#", "Date", "Prev Odo", "Curr Odo", "Delta", "Vol(L)", "Cost", "Eff(km/l)", "Cost(curr/km)");
+    printf("------------------------------------------------------------------------------------------------------------\n");
+
+    while (fscanf(file, "%s %f %f %f %f", 
+                  record.date, &record.prevOdometer, &record.currOdometer, 
+                  &record.volumePumped, &record.totalCost) != EOF) {
+        
+        delta = record.currOdometer - record.prevOdometer;
+        eff = (record.volumePumped > 0) ? delta / record.volumePumped : 0.0;
+        costEff = (delta > 0) ? record.totalCost / delta : 0.0;
+
+        printf("%-3d | %-12s | %-10.1f | %-10.1f | %-8.1f | %-6.2f | %-8.2f | %-10.2f | %-15.2f\n",
+               lineNum++, record.date, record.prevOdometer, record.currOdometer,
+               delta, record.volumePumped, record.totalCost, eff, costEff);
+    }
+    printf("------------------------------------------------------------------------------------------------------------\n");
+    fclose(file);
+}
+
+void deleteRecord() {
+    FILE *file, *temp;
+    struct FuelRecord record;
+    int targetLine, currentLine = 1;
+    int found = 0;
+
+    // Show records first so user knows the ID
+    viewRecords();
+
+    printf("\nEnter the Row # to delete: ");
+    if (scanf("%d", &targetLine) != 1) {
+        printf("Invalid input.\n");
+        clearInputBuffer();
+        return;
+    }
+
+    file = fopen("fuel_log.txt", "r");
+    temp = fopen("temp.txt", "w");
+
+    if (file == NULL || temp == NULL) {
+        printf("Error opening files.\n");
+        return;
+    }
+
+    while (fscanf(file, "%s %f %f %f %f", 
+                  record.date, &record.prevOdometer, &record.currOdometer, 
+                  &record.volumePumped, &record.totalCost) != EOF) {
+        
+        if (currentLine != targetLine) {
+            fprintf(temp, "%s %.2f %.2f %.2f %.2f\n", 
+                    record.date, record.prevOdometer, record.currOdometer, 
+                    record.volumePumped, record.totalCost);
+        } else {
+            found = 1;
+        }
+        currentLine++;
+    }
+
+    fclose(file);
+    fclose(temp);
+
+    if (found) {
+        remove("fuel_log.txt");
+        rename("temp.txt", "fuel_log.txt");
+        printf("Record #%d deleted successfully.\n", targetLine);
+    } else {
+        remove("temp.txt");
+        printf("Record #%d not found.\n", targetLine);
+    }
+}
+
+void editRecord() {
+    FILE *file, *temp;
+    struct FuelRecord record;
+    int targetLine, currentLine = 1;
+    int found = 0;
+
+    viewRecords();
+
+    printf("\nEnter the Row # to edit: ");
+    if (scanf("%d", &targetLine) != 1) {
+        printf("Invalid input.\n");
+        clearInputBuffer();
+        return;
+    }
+
+    file = fopen("fuel_log.txt", "r");
+    temp = fopen("temp.txt", "w");
+
+    if (file == NULL || temp == NULL) {
+        printf("Error opening files.\n");
+        return;
+    }
+
+    while (fscanf(file, "%s %f %f %f %f", 
+                  record.date, &record.prevOdometer, &record.currOdometer, 
+                  &record.volumePumped, &record.totalCost) != EOF) {
+        
+        if (currentLine == targetLine) {
+            found = 1;
+            printf("\n--- Enter New Details for Row %d ---\n", targetLine);
+            printf("New Date (DD-MM-YYYY): ");
+            scanf("%s", record.date);
+            printf("New Prev Odometer: ");
+            scanf("%f", &record.prevOdometer);
+            printf("New Curr Odometer: ");
+            scanf("%f", &record.currOdometer);
+            printf("New Volume: ");
+            scanf("%f", &record.volumePumped);
+            printf("New Cost: ");
+            scanf("%f", &record.totalCost);
+        }
+        
+        fprintf(temp, "%s %.2f %.2f %.2f %.2f\n", 
+                record.date, record.prevOdometer, record.currOdometer, 
+                record.volumePumped, record.totalCost);
+        
+        currentLine++;
+    }
+
+    fclose(file);
+    fclose(temp);
+
+    if (found) {
+        remove("fuel_log.txt");
+        rename("temp.txt", "fuel_log.txt");
+        printf("Record #%d updated successfully.\n", targetLine);
+    } else {
+        remove("temp.txt");
+        printf("Record #%d not found.\n", targetLine);
+    }
+}
+
+void clearInputBuffer() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+}
