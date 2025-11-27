@@ -1,0 +1,364 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
+
+
+#ifdef _WIN32
+#include <windows.h>
+#define SLEEP_MS(x) Sleep(x)
+#else
+#include <unistd.h>
+#define SLEEP_MS(x) usleep(x * 1000)
+#endif
+
+#define numberOfLifts 2
+#define topFloorNumber 7
+#define bottomFloorNumber 0
+#define numberOfFloors 8
+
+struct liftInfo {
+    int id;
+    float currentPosition;  // Current position (0.0 - 7.0)
+    int directionVector;    // 1 (Up) -1 (Down) 0 (Stationary)
+    float destinationFloor; // Where the lift is currently heading
+    float finalDest;        // Where the user wants to go (after pickup)
+    int hasPassenger;       // Boolean: Is user inside?
+    float distanceC;        // Calculated cost/distance to serve user
+};
+
+struct liftInfo lifts[numberOfLifts];
+
+void randomScenarioGenerator(struct liftInfo lifts[]);
+int efficiencyCalculator(struct liftInfo lifts[], float calledFloor, float desiredFloor);
+void liftAnimator(float calledFloor, float desiredFloor, int chosenLiftIndex);
+void renderFrame(float calledFloor, float desiredFloor, int chosenLiftIndex, int userIsWaiting, int userHasArrived);
+void deleteLines(int n);
+
+void randomScenarioGenerator(struct liftInfo lifts[]) {
+    for(int i = 0; i < numberOfLifts; i++) {
+        lifts[i].id = i;
+        lifts[i].hasPassenger = 0;
+        
+        lifts[i].currentPosition = (float)(rand() % numberOfFloors);
+        
+        int stateRoll = rand() % 5; 
+        
+        if (stateRoll == 0) {
+            lifts[i].directionVector = 0;
+            lifts[i].destinationFloor = lifts[i].currentPosition;
+        } 
+        else {
+            int direction;
+            
+            if ((int)lifts[i].currentPosition == bottomFloorNumber) 
+                direction = 1; 
+            else if ((int)lifts[i].currentPosition == topFloorNumber) 
+                direction = -1;  
+            else 
+                direction = (rand() % 2 == 0) ? 1 : -1;
+
+            lifts[i].directionVector = direction;
+            
+            if (direction == 1) {
+                int range = topFloorNumber - (int)lifts[i].currentPosition;
+
+                if (range > 0) 
+                    lifts[i].destinationFloor = (float)((int)lifts[i].currentPosition + 1 + (rand() % range));
+                else {
+                    lifts[i].destinationFloor = lifts[i].currentPosition;
+                    lifts[i].directionVector = 0;
+                }
+            } 
+            else {
+                int range = (int)lifts[i].currentPosition - bottomFloorNumber;
+
+                if (range > 0) 
+                    lifts[i].destinationFloor = (float)(bottomFloorNumber + (rand() % range));
+                else {
+                    lifts[i].destinationFloor = lifts[i].currentPosition;
+                    lifts[i].directionVector = 0;
+                }
+            }
+        }
+    }
+}
+
+int efficiencyCalculator(struct liftInfo lifts[], float calledFloor, float desiredFloor) {
+
+    renderFrame(calledFloor, desiredFloor, -1, 1, 0); 
+
+    printf("\n--- Lift Status ---\n");
+    
+    int bestLiftIndex = 0;
+    float minDistance = 1000.0;
+
+    int userDir = (desiredFloor > calledFloor) ? 1 : -1;
+
+    for (int i = 0; i < numberOfLifts; i++) {
+        int isIntercept = 0;
+
+        if (lifts[i].directionVector == 0) {
+            lifts[i].distanceC = fabs(lifts[i].currentPosition - calledFloor);
+        } else {
+                        
+            if (lifts[i].directionVector == 1) { // Lift Going Up
+                // User wants to go Up AND User is between Current and Destination
+                if (userDir == 1 && 
+                    lifts[i].currentPosition <= calledFloor && 
+                    calledFloor <= lifts[i].destinationFloor) {
+                    isIntercept = 1;
+                }
+            } else { // Lift Going Down
+                // User wants to go Down AND User is between Current and Destination
+                if (userDir == -1 && 
+                    lifts[i].currentPosition >= calledFloor && 
+                    calledFloor >= lifts[i].destinationFloor) {
+                    isIntercept = 1;
+                }
+            }
+
+            if (isIntercept) {
+                // Cost is just distance to pickup (we stop on the way)
+                lifts[i].distanceC = fabs(lifts[i].currentPosition - calledFloor);
+            } else {
+                // Standard: Finish job -> Go to user
+                float distToFinish = fabs(lifts[i].currentPosition - lifts[i].destinationFloor);
+                float distToUser = fabs(lifts[i].destinationFloor - calledFloor);
+                lifts[i].distanceC = distToFinish + distToUser;
+            }
+        }
+
+        if (isIntercept) {
+            printf("Lift %d | Pos: %.1f | Dest: %.1f | Cost(Distance): %.1f (Intercept)\n", 
+               i, lifts[i].currentPosition, lifts[i].destinationFloor, lifts[i].distanceC);
+        } else {
+            printf("Lift %d | Pos: %.1f | Dest: %.1f | Cost(Distance): %.1f\n", 
+               i, lifts[i].currentPosition, lifts[i].destinationFloor, lifts[i].distanceC);
+        }
+
+        if (lifts[i].distanceC < minDistance) {
+            minDistance = lifts[i].distanceC;
+            bestLiftIndex = i;
+        }
+    }
+    
+    return bestLiftIndex;
+}
+
+void deleteLines(int n) {
+    // More robust ANSI logic:
+    // 1. Move cursor UP n lines to the start of the line (\033[<n>F)
+    // 2. Clear everything from cursor to end of screen (\033[J)
+    printf("\033[%dF", n); 
+    printf("\033[J");
+}
+
+void renderFrame(float calledFloor, float desiredFloor, int chosenLiftIndex, int userIsWaiting, int userHasArrived) {
+    
+    printf("\n----------------------------------\n"); 
+
+    char grid[15][40];
+
+    //Empties the array
+    for(int r=0; r<15; r++) {
+        for(int c=0; c<40; c++) grid[r][c] = ' ';
+        grid[r][39] = '\0';
+    }
+    //Elevator Shafts
+    for(int f=0; f<numberOfFloors; f++) {
+        int r = (7 - f) * 2;
+        grid[r][0] = f + '0';
+        grid[r][8] = '|'; grid[r][9] = '|';
+        grid[r][19] = '|'; grid[r][20] = '|'; grid[r][21] = '|';
+        grid[r][31] = '|'; grid[r][32] = '|';
+    }
+
+    int userRow = (7 - (int)calledFloor) * 2;
+    if (userIsWaiting)
+        grid[userRow][4] = '@'; 
+
+    int destRow = (7 - (int)desiredFloor) * 2;
+    
+    if (userHasArrived) 
+        grid[destRow][4] = '@'; 
+    else 
+        grid[destRow][4] = '>'; 
+    
+    for(int i=0; i<numberOfLifts; i++) {
+        int targetRow = (7 - (int)lifts[i].destinationFloor) * 2;
+        if(i==0) grid[targetRow][7] = '*';  
+        if(i==1) grid[targetRow][33] = '*'; 
+    }
+
+    for(int i=0; i<numberOfLifts; i++) {
+        int r = (int)((7.0 - lifts[i].currentPosition) * 2);
+        char arrow = '-';
+        if (lifts[i].directionVector == 1) arrow = '^';
+        if (lifts[i].directionVector == -1) arrow = 'v';
+
+        if (i == 0) {
+            grid[r][12] = '[';
+            if (i == chosenLiftIndex && lifts[i].hasPassenger) grid[r][13] = '@';
+            grid[r][14] = ']';
+            grid[r][16] = arrow;
+        }
+        else {
+            grid[r][24] = arrow;
+            grid[r][26] = '[';
+            if (i == chosenLiftIndex && lifts[i].hasPassenger) grid[r][27] = '@';
+            grid[r][28] = ']';
+        }
+    }
+
+    for(int r=0; r<15; r++) {
+        printf("%s\n", grid[r]);
+    }
+    printf("--------------------------------------\n");
+}
+
+void liftAnimator(float calledFloor, float desiredFloor, int chosenLiftIndex) {
+    lifts[chosenLiftIndex].finalDest = desiredFloor;
+    
+    // Check for Interception Logic (Re-evaluate for chosen lift)
+    int isIntercept = 0;
+    int userDir = (desiredFloor > calledFloor) ? 1 : -1;
+    
+    if (lifts[chosenLiftIndex].directionVector != 0) {
+        if (lifts[chosenLiftIndex].directionVector == 1) { // Up
+            // Lift Up, User Up, User on path
+            if (userDir == 1 && 
+                lifts[chosenLiftIndex].currentPosition <= calledFloor && 
+                calledFloor <= lifts[chosenLiftIndex].destinationFloor) {
+                isIntercept = 1;
+            }
+        } else { // Down
+            // Lift Down, User Down, User on path
+            if (userDir == -1 && 
+                lifts[chosenLiftIndex].currentPosition >= calledFloor && 
+                calledFloor >= lifts[chosenLiftIndex].destinationFloor) {
+                isIntercept = 1;
+            }
+        }
+    }
+
+    if (isIntercept) {
+        lifts[chosenLiftIndex].destinationFloor = calledFloor; 
+    } else if (lifts[chosenLiftIndex].directionVector == 0) {
+        // Idle Case
+        lifts[chosenLiftIndex].destinationFloor = calledFloor;
+    }
+    // Else: Standard Busy Case (Finish Old -> Go to Called)
+
+    int userIsWaiting = 1;
+    int simulationRunning = 1;
+    int userHasArrived = 0;
+    int busyLiftPaused = 0;
+    int isFirstFrame = 1; // Flag to prevent deleting history on start
+
+    while(simulationRunning) {
+        
+        // Update Physics
+        for(int i = 0; i < numberOfLifts; i++) {
+            if (lifts[i].currentPosition == lifts[i].destinationFloor) {
+                if (i == chosenLiftIndex) {
+                    if (userIsWaiting) {
+                        if (lifts[i].currentPosition == calledFloor) {
+                            lifts[i].hasPassenger = 1;
+                            userIsWaiting = 0;
+                            
+                            // Special handle for delay frames: Must delete previous frame if it exists
+                            // Adjusted to 18 lines to match renderFrame output height exactly
+                            if (!isFirstFrame) deleteLines(18); 
+                            renderFrame(calledFloor, desiredFloor, chosenLiftIndex, userIsWaiting, 0);
+                            isFirstFrame = 0; // Ensure subsequent frames delete this one
+                            
+                            SLEEP_MS(1000); 
+
+                            lifts[i].destinationFloor = lifts[i].finalDest;
+                        } else {
+                            if (busyLiftPaused == 0) {
+                                busyLiftPaused = 1;
+                            } else {
+                                lifts[i].destinationFloor = calledFloor;
+                            }
+                        }
+                    } else {
+                        if (lifts[i].currentPosition == lifts[i].finalDest) {
+                            lifts[i].hasPassenger = 0;
+                            lifts[i].directionVector = 0;
+                            simulationRunning = 0;
+                            userHasArrived = 1;
+                        }
+                    }
+                } else {
+                    lifts[i].directionVector = 0; 
+                }
+            } else {
+                if(i == chosenLiftIndex) {
+                }
+            }
+            
+            if (lifts[i].currentPosition < lifts[i].destinationFloor) {
+                lifts[i].directionVector = 1;
+                lifts[i].currentPosition += 0.5;
+            } else if (lifts[i].currentPosition > lifts[i].destinationFloor) {
+                lifts[i].directionVector = -1;
+                lifts[i].currentPosition -= 0.5;
+            } else {
+                lifts[i].directionVector = 0;
+            }
+        }
+
+        // Animation Rendering Logic
+        if (!isFirstFrame) {
+            deleteLines(18); // Adjusted to 18 to match renderFrame height
+        }
+        
+        renderFrame(calledFloor, desiredFloor, chosenLiftIndex, userIsWaiting, userHasArrived);
+        isFirstFrame = 0; // Mark that we have printed at least one animation frame
+        
+        SLEEP_MS(600); 
+    }
+    
+    printf("\nDone! User arrived at Floor %.0f.\n", desiredFloor);
+}
+
+int main(){
+    float calledFloor, desiredFloor;
+    int chosenLiftIndex;
+    
+    srand(time(0));
+
+    randomScenarioGenerator(lifts);
+
+    do {
+        printf("Which floor are you on? (0-7):\n");
+        scanf("%f", &calledFloor);
+        if (calledFloor < 0 || calledFloor > 7) {
+            printf("Invalid floor. Please choose between 0 and 7.\n");
+        }
+    } while (calledFloor < 0 || calledFloor > 7);
+
+    do {
+        printf("Which floor do you want to go to? (0-7):\n");
+        scanf("%f", &desiredFloor);
+        
+        if (desiredFloor < 0 || desiredFloor > 7) {
+            printf("Invalid floor. Please choose between 0 and 7.\n");
+        } else if (calledFloor == desiredFloor) {
+            printf("You are already on the desired floor. Would you like to change destination? Please enter a different floor:\n");
+        }
+    } while (desiredFloor < 0 || desiredFloor > 7 || calledFloor == desiredFloor);
+
+    chosenLiftIndex = efficiencyCalculator(lifts, calledFloor, desiredFloor);
+    
+    printf("\nLift %d selected. Press ENTER to start animation...", chosenLiftIndex);
+    while ((getchar()) != '\n');
+    getchar();
+
+    liftAnimator(calledFloor, desiredFloor, chosenLiftIndex);
+
+    return 0;
+}
